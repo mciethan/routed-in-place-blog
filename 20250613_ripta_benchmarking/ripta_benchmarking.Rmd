@@ -1,0 +1,428 @@
+---
+title: 'Cutting RIPTA Service is not "Efficient"'
+author: "Ethan McIntosh"
+date: "2025-06-13"
+output:
+  pdf_document: default
+  html_document: 
+    theme: null
+    highlight: null
+    mathjax: null
+  word_document: default
+urlcolor: blue
+linkcolor: blue
+---
+
+## Introduction
+
+Rhode Island's public transit service is about to get significantly worse, and much of the blame belongs with the state's top elected officials. Despite being presented with [multiple options to fully fund public transit](https://ecori.org/riptas-next-stop-fiscal-cliff-or-full-funding/) for the upcoming fiscal year and beyond, these officials failed to fill the \$32.6 million operating deficit faced by the Rhode Island Public Transit Authority (RIPTA), with the governor in particular making no attempt to plug this gap in his original budget proposal. The House of Representatives, to its credit, [proposed a budget](https://rhodeislandcurrent.com/2025/06/11/living-on-a-prayer-house-budget-gets-ripta-almost-halfway-there-in-plugging-32-6-million-deficit/) that is expected to cut RIPTA's deficit by \$15 million, but with \$17 million of RIPTA's operating needs remaining unfunded, the House budget is a literal half-measure which will still force RIPTA to make large-scale service cuts. The refusal of the state's top officials to properly fund RIPTA betrays their profound lack of commitment to both the 40,000 riders who depend on RIPTA to get around and to the state's climate, housing, and economic goals, all of which are rendered toothless without a strong public transit system to support them.
+
+Throughout this year's budgeting process, the governor and top legislators have repeatedly emphasized their focus on the "efficiency study" they've required RIPTA to complete as a precondition for funding. Given [how many times RIPTA has already been studied for "efficiency"](https://rhodeislandcurrent.com/2025/04/28/another-efficiency-study-for-ripta-is-a-waste-of-time/), it's hard to believe that this latest report will uncover any hidden sources of waste or magical solutions for RIPTA to do more with less. All the report has accomplished so far is allow state leaders to insinuate that RIPTA has an "efficiency" problem, redirecting public attention away from the fact that their proposed budget will leave transit riders and state policy goals in the lurch. Recently, advocates have also [warned](https://rhodeislandcurrent.com/2025/06/11/every-ripta-route-tells-a-story-is-the-general-assembly-listening/) that the report's scoring system for individual RIPTA routes may be used to guide which services get cut, which would make the report function more like a "hit list" than an "efficiency study".
+
+In this post, I use the most recent publicly available data to compare RIPTA's operational efficiency and performance with its peer agencies. Not only does RIPTA continue to outperform similar agencies on key measures of service productivity and cost effectiveness, it has done so despite making deeper COVID-era service cuts, steeper reductions to its administrative costs, and faster increases to bus driver wages than any of its peer agencies. In other words, __RIPTA has already gone above and beyond given its circumstances, and forcing additional cuts to RIPTA service isn't just unjust and misguided - it's also inefficient.__
+
+## Key Takeaways
+
+* Prevailing bus driver wages grew by __22% above inflation__ in the Providence metro area from pre-pandemic to the present, much faster than in most peer agencies' metro areas, suggesting that RIPTA has had to do more than most other agencies to maintain competitive wages in the face of a nationwide driver shortage.
+
+* While federal aid played an important role in offsetting the pandemic's financial impact, __RIPTA also slashed its inflation-adjusted administrative costs from 2020-2022__, by more than any of its peers.
+
+* RIPTA was __unique among peer agencies in maintaining full service levels from 2020-2022__. However, once RIPTA was forced to make service cuts in FY2023, they were deeper than any COVID-era cuts made by peer agencies.
+
+* Despite its uniquely challenging circumstances, RIPTA continues to serve __more riders per vehicle hour at lower operating costs per rider__ than most of its peer agencies.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(ggplot2)
+library(scales)
+library(formattable)
+```
+
+```{r, include=FALSE}
+agency_ids <- c(
+  10001 # RIPTA
+  
+  # these agencies were identified as comparable to RIPTA by the efficiency study consultant
+  , 20002 # Capital District Transportation Authority (Albany, NY)
+  , 30075 # Delaware Transit Corporation
+  , 70005 # Kansas City Area Transportation Authority
+  , 20113 # Regional Transit Service (Rochester, NY)
+  , 30083 # Transportation District Commission of Hampton Roads (Norfolk, VA)
+  
+  # these agencies operate in larger metropolitan areas, but RIPTA compares itself to them in the TMP
+  , 40004 # Metropolitan Transit Authority (Nashville, TN)
+  , 50050 # Indianapolis and Marion County Public Transportation
+  
+  # I added these agencies because they are similar-ish in service area pop / size to RIPTA
+  , 10048 # Hartford, CT
+  , 40028 # LeeTran (Cape Coral - Fort Myers, FL)
+  , 90012 # San Joaquin Regional Transit District (Stockton, CA)
+  , 40086 # Metropolitan Bus Authority (San Juan, PR)
+  , 50012 # Southwest Ohio Regional Transit Authority (Cincinnati, OH)
+  , 50015 # The Greater Cleveland Regional Transit Authority (Cleveland, OH)
+  , 40040 # Jacksonville Transportation Authority (Jacksonville, FL)
+  , 60090 # Lower Rio Grande Valley Development Council (McAllen, TX)
+)
+```
+
+```{r, include=FALSE}
+# TODO: remove extra columns from the monthly input file so that it's a true reflection of the NTD input
+monthly_modal <- read.csv('data/Monthly_Modal_Time_Series_20250529.csv')
+```
+
+```{r, include=FALSE}
+annual_svc_opex_filepath <- 'data/2023 TS2.1 Service Data and Operating Expenses Time Series by Mode.xlsx'
+
+annual_inflation <- read.csv('data/annual_inflation.csv') 
+cpiu_2023 <- (annual_inflation %>% filter(year == 2023))$cpiu
+cpiu_2024 <- (annual_inflation %>% filter(year == 2024))$cpiu
+```
+
+```{r, include=FALSE}
+# Each tab of the input data is a separate statistic, formatted in the same way
+statistics <- c('OpExp Total', 'OpExp VO', 'OpExp VM', 'OpExp NVM', 'OpExp GA',
+                'VOMS', 'VRM', 'VRH', 'UPT', 'PMT')
+
+dfs <- list()
+for (stat in statistics) { # read in each tab
+  df <- read_excel(annual_svc_opex_filepath, sheet=stat) %>%
+    # filter to our agencies of interest and to directly operated (DO) motor bus (MB) services
+    filter(`NTD ID` %in% agency_ids, Mode == 'MB', Service == 'DO') %>%
+    # turn the year columns into rows and label the given statistic as 'Value'
+    pivot_longer(cols=`1991`:`2023`, names_to='Year', values_to='Value') %>%
+    mutate(statistic=stat)
+  
+  if (str_detect(stat, 'OpExp')) { # inflation-adjust the operating expense values
+    df <- df %>%
+      inner_join(annual_inflation %>% mutate(year = as.character(year)), by=join_by(Year == year)) %>%
+      mutate(Value = Value * cpiu_2023 / cpiu) %>%
+      select(-c(cpiu, yoy))
+  }
+  
+  dfs[[stat]] <- df # populate a list of the dataframes for each statistic
+}
+
+opex_stats <- dfs %>%
+  bind_rows() %>% # stack the list into a single dataframe, then put one statistic in each column
+  pivot_wider(id_cols = c(`NTD ID`, `Agency Name`, Year, `UZA Population`, `UZA Area SQ Miles`), 
+              names_from='statistic', values_from='Value') %>%
+  # calculate total opex and admin opex per (vehicle, service mile, service hour, pax, pax mile)
+  mutate(across(VOMS:PMT, ~ `OpExp Total`/.x, .names='opex_per_{.col}')
+         , across(VOMS:PMT, ~ `OpExp VO`/.x, .names='opexVO_per_{.col}')
+         , across(VOMS:PMT, ~ `OpExp VM`/.x, .names='opexVM_per_{.col}')
+         , across(VOMS:PMT, ~ `OpExp NVM`/.x, .names='opexNVM_per_{.col}')
+         , across(VOMS:PMT, ~ `OpExp GA`/.x, .names='opexGA_per_{.col}'))
+```
+
+```{r, include=FALSE}
+plotdata <- opex_stats %>%
+  filter(Year > 2014) 
+
+agency_focus <- plotdata %>% filter(`NTD ID` == 10001) # RIPTA
+agency_focus_maxyear <- agency_focus %>% slice_max(Year)
+agency_color <- '#0085CA'
+```
+
+## Defining Peer Agencies
+
+Against which "peer agencies" can RIPTA performance be meaningfully compared? There are multiple possible criteria, and every transit agency is unique, but I opted to cast a relatively broad net, comparing RIPTA with 15 other US-based transit agencies using data from the National Transit Database. These include the 5 agencies that are identified as peers in [part one of RIPTA's current efficiency study](https://rhodeislandcurrent.com/2025/05/29/riptas-efficiency-study-is-a-third-of-the-way-there/), 2 agencies to which RIPTA compares itself in its long-range plan, [Transit Forward RI 2040](https://www.ripta.com/transitforwardri/), and 8 other agencies that I chose because they have similar service area or metro area populations as RIPTA. To compare apples to apples across these 16 agencies, I only consider performance data for their fixed route bus services, and I adjust all dollar values for inflation using the Consumer Price Index for All Urban Consumers.
+
+```{r, echo=FALSE, warning=FALSE, fig.width=8, fig.height=6}
+latest_monthly <- monthly_modal %>%
+  filter(Year == 2024, Month == 'March', 
+         Mode=='MB', Type.of.Service=='DO') 
+
+latest_monthly %>%
+  ggplot(aes(y=`Service.Area.Population`, x=`Primary.UZA.Population`, group=Agency, label=NTD.ID)) +
+  geom_point(color='#999999', shape=1, size=0.8) +
+  geom_point(data=latest_monthly %>% filter(NTD.ID %in% agency_ids), color='#999999') +
+  geom_point(data=latest_monthly %>% filter(NTD.ID == 10001), color=agency_color, size=2) +
+  geom_text(data=latest_monthly %>% filter(NTD.ID == 10001), color=agency_color, 
+            label = 'RIPTA', nudge_y = 20000, nudge_x = 0.3e6, fontface='bold') +
+  geom_text(data=latest_monthly %>% filter(NTD.ID == 10001), color='#999999', 
+            label = 'Peer agencies', nudge_y=-180000, nudge_x = 0.6e6, fontface='bold') +
+  geom_text(data=latest_monthly %>% filter(NTD.ID == 10001), color='#999999', 
+            label = 'Other agencies', nudge_y=-0.9e6, nudge_x = 1.4e6) +
+  scale_x_continuous(labels = unit_format(unit = "M", scale = 1e-6), limits=c(0, 6e6)) +
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6), limits=c(0, 2e6)) +
+  labs(x='Primary Urbanized Area (UZA) Population (Millions)', y='Service Area Population (Millions)') +
+  ggtitle("RIPTA's peers were chosen based on metro populations & agency characteristics.") +
+  annotate(geom='text', x=-Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=0, vjust=-1)
+```
+
+Roughly speaking, RIPTA and its peer agencies all have medium-sized service areas with populations of around 1 million. Their primary urbanized area populations are also centered around 1 million. Delaware's transit agency may appear to be an outlier with its primary urbanized area population of 5.7 million, but that is just a quirk of the fact that Delaware's largest city, Wilmington, belongs to the much larger Philadelphia urbanized area, most of which is not actually served by the Delaware Transit Corporation. 
+
+```{r, echo=FALSE}
+latest_monthly %>%
+  filter(NTD.ID %in% agency_ids) %>%
+  mutate(Service.Area.Density = Service.Area.Population / Service.Area.Sq.Miles,
+         Primary.UZA.Density = Primary.UZA.Population / Primary.UZA.Sq.Miles) %>%
+  select(Agency, Service.Area.Population, Service.Area.Sq.Miles, Service.Area.Density,
+         Primary.UZA.Name, Primary.UZA.Population, Primary.UZA.Sq.Miles, Primary.UZA.Density) %>%
+  rename_with(~ paste0("UZA", gsub('Primary.UZA', '', .)), starts_with("Primary.UZA")) %>%
+  arrange(case_when(Agency == 'Rhode Island Public Transit Authority' ~ 'AAA', .default = Agency))
+```
+
+Among the 16 agencies considered here, RIPTA is in the middle of the pack (between 5th and 9th) for most of the key characteristics of its service area and and primary urbanized area, ensuring that any differences in operational performance are not just a function of the size of the population each agency serves. However, RIPTA has one of the lowest service area densities of this group (12th out of 16), making its strong performance in ridership and cost efficiency even more notable, since lower residential density is almost always associated with lower ridership and less cost-efficient operations.
+
+## Ridership
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>% #TODO: find and remove the outlier agencies
+  ggplot(aes(x=Year, y=UPT, group=`Agency Name`, 
+             label=paste(format(round(UPT / 1e6, 0), trim = TRUE), "M"))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, 
+            nudge_x=0.3, fontface='bold') +
+  labs(y='Unlinked Passenger Trips - Fixed Route Bus (Millions)', x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6), limits=c(0, 33e6)) +
+  ggtitle("RIPTA ridership is strong relative to its peers, but has been slow to recover.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+Ridership is an important performance measure for transit agencies because:
+
+* it reflects the direct benefits that riders get from transit service, "voting with their feet," and
+* many of the indirect benefits that transit usage has for society at large, such as reduced congestion and emissions, tend to scale up with increased ridership. 
+
+RIPTA has always punched above its weight in terms of ridership, ranking 2nd among its peer agencies in total passenger trips through 2019. However, RIPTA ridership did not bounce back from the impacts of the pandemic as quickly as it did for some peer agencies, putting RIPTA's 11 million FY2023 passenger trips at 5th place among its peers. 
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=UPT/VRH, group=`Agency Name`, label=sprintf('%#.1f', UPT/VRH))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, 
+            nudge_y=1.3, nudge_x=0.3, fontface='bold') +
+  #scale_color_manual(values=c(g, g, g, g, g, g, 'black', g)) +
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  lims(y=c(0,38)) +
+  labs(y='Unlinked Passenger Trips per Vehicle Revenue Hour \n(Fixed-Route Bus)', 
+       x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  ggtitle("RIPTA ridership per service hour is mostly recovered (and higher than most peers).") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+When considering ridership relative to the total quantity of service that each agency operates, RIPTA is strong relative to its peers, having the 3rd-highest service productivity of 20.5 passenger trips per vehicle hour. This suggests that the main thing holding back RIPTA ridership is the agency's capacity to restore service levels. This capacity can only be improved with stable sources of funding.
+
+## Operating Expenses & Service Levels
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=opex_per_UPT, group=`Agency Name`, label=sprintf('$%#.2f', opex_per_UPT))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, 
+            nudge_y=1.8, nudge_x=0.3, fontface='bold') +
+  #scale_color_manual(values=c(g, g, g, g, g, g, 'black', g)) +
+  #theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  lims(y=c(0,44)) +
+  labs(y='Operating Expenses ($2023) per Unlinked Passenger Trip - \nFixed Route Bus') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  ggtitle("On a per-passenger-trip basis, RIPTA operating expenses are relatively low.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+While RIPTA has relatively high total operating expenses compared to its peers, it had the 5th lowest operating costs per passenger trip in FY2023, indicating that RIPTA both serves more riders and serves them more cost-efficiently than most similar transit agencies. Across all agencies, trends in costs per passenger trip tend to mirror ridership trends, spiking during COVID-19 as ridership plummeted, before coming back down in 2022 and 2023 as ridership started returning.
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=`OpExp Total`, group=`Agency Name`, 
+             label=paste0('$', format(round(`OpExp Total` / 1e6, 0), trim = TRUE), " M"))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, nudge_y=9e6, nudge_x=0.2, fontface='bold') +
+  labs(y='Operating Expenses - Fixed Route Bus ($2023, Millions)', x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6), limits=c(0, 230e6)) +
+  ggtitle("RIPTA has relatively high total operating costs, but reduced them during COVID.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+During the height of COVID-19, RIPTA reduced its total inflation-adjusted operating expenses more steeply than many peer agencies. RIPTA made its sharpest reductions in administrative costs, dedicating a greater share of its budget to vehicle operations and maintenance from 2021 onward. While almost every one of RIPTA's peers had either flat or growing administrative costs relative to inflation from 2020 to 2023, RIPTA administrative expenses were substantially reduced during this time and have been at historically low levels, calling into question why RIPTA is now being asked to find additional "efficiencies" as a precondition to receiving basic funding.
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=`OpExp GA`, group=`Agency Name`, 
+             label=paste0('$', format(round(`OpExp GA` / 1e6, 0), trim = TRUE), " M"))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, 
+            nudge_y=1.7e6, nudge_x=0.2, fontface='bold') +
+  labs(y='Administrative Operating Expenses - Fixed Route Bus \n($2023, Millions)', x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6), limits=c(0, 46e6)) +
+  ggtitle("RIPTA slashed its administrative expenses in particular, more so than its peers.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+Despite its operating expenses trending well below inflation, RIPTA managed to be one of the only agencies that didn't cut service in 2020 or 2021 in response to COVID-19 and its negative impacts. In fact, RIPTA was the only agency among its peers that ran slightly more total service in FYs 2021 and 2022 than it had previously. 
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=VRH, group=`Agency Name`, label=format(VRH, big.mark=','))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, 
+            nudge_y=80000, nudge_x=0.2, fontface='bold') +
+  labs(y='Vehicle Revenue Hours - Fixed Route Bus', x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  scale_y_continuous(labels = comma, limits=c(0, 1.2e6)) +
+  ggtitle("RIPTA held service levels steady from FY20-22 but made sharp cuts in FY23.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+Federal aid played an important role for RIPTA and many agencies in filling the gap between decreased revenues from fares and taxes and increased costs from new safety measures and operational adjustments during the height of the pandemic.  However, once that aid slowed down and the nationwide commercial driver shortage started to ramp up, impacting agencies' ability to retain sufficient bus operator headcounts, RIPTA was forced to make steep service cuts in September 2022 (part of Fiscal Year 2023). 
+
+These FY2023 service cuts resulted in a spike in the amount of money RIPTA had to spend per hour of service operated, despite the agency having reduced total inflation-adjusted operating costs from pre-pandemic levels. Multiple peer agencies saw costs per service hour crest above $200 in FY2021, concurrent with their COVID-era service cuts, before seeing these costs per hour fall again as they restored service. This shows that while we often think that "efficiency" is correlated with being smaller, the opposite can sometimes be true. For transit agencies, service cuts tend to be inefficient because agencies must continue to pay for the upkeep of their physical assets (e.g., buses, garages, and offices) even though they're getting less service out of those assets. Further cuts to RIPTA funding and service won't just hurt Rhode Island transit riders, they will also likely lead to further increases in the agency's costs per service hour, highlighting a dark irony in the fact that state leaders are justifying the current round of cuts in the name of "efficiency."
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+plotdata %>%
+  ggplot(aes(x=Year, y=opex_per_VRH, group=`Agency Name`, label=sprintf('$%#.2f', opex_per_VRH))) +
+  geom_line(color='#999999') +
+  geom_point(data=agency_focus, color=agency_color, size=2.5) +
+  geom_line(data=agency_focus, color=agency_color, linewidth=1) +
+  geom_text(data=agency_focus_maxyear, color=agency_color, nudge_y=11, nudge_x=0.2, fontface='bold') +
+  lims(y=c(0,300)) +
+  labs(y='Operating Expenses ($2023) per Vehicle Revenue Hour - \nFixed Route Bus'
+       , x='Fiscal Years') +
+  # geom_text(data = df_labels, aes(label = `Agency Name`), hjust = -0.5, vjust = 0.5) + # TODO: annotate the end of each line instead of having a legend? or would colors be easier?
+  ggtitle("As a result, RIPTA costs per service hour spiked later than those of its peers.") +
+  annotate(geom='text', x=Inf, y=-Inf, label='Chart: routedinplace.info   Data: National Transit Database', size=2, hjust=1, vjust=-1)
+```
+
+However, it is notable that RIPTA's 2022 service cuts represented a steeper 1-year drop in total service hours than the service cuts made by any peer agencies during the entire pandemic, despite RIPTA having already shifted more of its budget away from administrative costs and toward vehicle operations and maintenance prior to FY2023. This suggests that it will likely take RIPTA more inflation-adjusted dollars per service hour than it did pre-pandemic to restore operations to pre-pandemic service levels. Does this mean that RIPTA's costs per service hour have increased because of some mysterious source of unnecessary spending, as implied by state leaders in their constant emphasis on the "efficiency study"? There is a much simpler explanation: RIPTA is paying its bus drivers more than it used to.
+
+## Wages
+
+```{r, include=FALSE}
+years <- seq(2018, 2024)
+
+areas <- c(
+  '77200' # Providence-Warwick, RI-MA
+  
+  ,'44700' # Stockton-Lodi, CA
+  ,'73450' # Hartford-West Hartford-East Hartford, CT
+  ,'15980' # Cape Coral-Fort Myers, FL
+  ,'27260' # Jacksonville, FL
+  ,'26900' # Indianapolis-Carmel-Anderson, IN
+  ,'28140' # Kansas City, MO-KS
+  ,'10580' # Albany-Schenectady-Troy, NY
+  ,'40380' # Rochester, NY
+  ,'17140' # Cincinnati, OH-KY-IN
+  ,'17460' # Cleveland-Elyria, OH
+  ,'41980' # San Juan-Carolina-Caguas, PR
+  ,'34980' # Nashville-Davidson--Murfreesboro--Franklin, TN
+  ,'32580' # McAllen-Edinburg-Mission, TX
+  ,'47260' # Virginia Beach-Norfolk-Newport News, VA-NC
+  ,'20100' # Dover, DE
+  ,'37980' # Philadelphia-Camden-Wilmington, PA-NJ-DE-MD
+  
+  , '17410' # Cleveland, OH (new area ID in 2024)
+  , '25540' # Hartford-West Hartford-East Hartford, CT (new area ID in 2024)
+  , '39300' # Providence-Warwick, RI-MA (new area ID in 2024)
+)
+
+occ_codes <- c(
+  '00-0000' # All Occupations
+  , '11-0000' # Management Occupations
+  , '53-3021' # Bus Drivers, Transit and Intercity (2018)
+  , '53-3022' # Bus Drivers, School or Special Client (2018)
+  , '53-3052' # Bus Drivers, Transit and Intercity (2019+)
+  , '53-3051' # Bus Drivers, School or Special Client (2019+)
+  , '49-3031' # Bus and Truck Mechanics and Diesel Engine Specialists
+  , '53-3032' # Heavy and Tractor-Trailer Truck Drivers
+  , '53-3058' # Passenger Vehicle Drivers, Except Bus Drivers, Transit and Intercity
+)
+
+occ_dfs <- list()
+for (yyyy in years) {
+  df <- read_excel(paste0('data/oesm', substr(as.character(yyyy), 3, 4), 
+                          'ma/MSA_M', as.character(yyyy), '_dl.xlsx'))
+  
+  names(df) <- names(df) %>% str_to_upper() # the 2019 file has lower case column names for some reason
+
+  occ_dfs[[as.character(yyyy)]] <- df %>% filter(AREA %in% areas, OCC_CODE %in% occ_codes) %>% mutate(YEAR = yyyy)
+}
+```
+
+```{r, include=FALSE}
+# Check that each area has as many years of data as are expected (taking into account that area names and IDs can sometimes change slightly)
+occ_dfs %>%
+  bind_rows() %>%
+  group_by(coalesce(AREA_NAME, AREA_TITLE)) %>% summarise(nyear = n_distinct(YEAR))
+```
+
+```{r, include=FALSE}
+# Check that each occupation has as many years of data as are expected (taking into account that occ names & IDs can sometimes change slightly)
+occ_dfs %>%
+  bind_rows() %>%
+  group_by(OCC_TITLE) %>% summarise(nyear = n_distinct(YEAR))
+```
+
+```{r, include=FALSE}
+occ_data <- occ_dfs %>%
+  bind_rows() %>% 
+  rowwise() %>%
+  # to create consistent time series from these inconsistently named and ID'd data, 
+  mutate(ac = coalesce(AREA_NAME, AREA_TITLE),
+         # we extract the first part of the area name / title (before any comma or hyphen)
+         area_consistent = str_split(str_split(ac, "-")[[1]][1], ',')[[1]][1],
+         # and we consolidate the two school bus drivers categories into one
+         OCC_TITLE = case_when(str_detect(OCC_TITLE, 'Bus Drivers, School') ~ 'Bus Drivers, School', .default=OCC_TITLE)) %>%
+  mutate(A_MEAN = case_when(is.na(as.numeric(A_MEAN)) ~ NA, .default = as.numeric(A_MEAN))) %>%
+  inner_join(annual_inflation, by=join_by(YEAR == year)) %>%
+      mutate(A_MEAN = A_MEAN * cpiu_2024 / cpiu) %>%
+      select(-c(cpiu, yoy)) %>%
+  filter(OCC_TITLE == 'Bus Drivers, Transit and Intercity')
+
+area_focus <- occ_data %>% filter(area_consistent == 'Providence')
+area_focus_maxyear <- area_focus %>% filter(YEAR == 2024)
+```
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+occ_chg <- occ_data %>%
+  filter(YEAR %in% c(2019, 2024), !is.na(A_MEAN)) %>%
+  group_by(area_consistent) %>%
+  mutate(nyear = n_distinct(YEAR)) %>%
+  ungroup() %>%
+  filter(nyear >= 2) %>%
+  pivot_wider(id_cols=area_consistent, names_from=YEAR, values_from=A_MEAN) %>%
+  mutate(pct_chg = `2024`/`2019` - 1) 
+
+occ_chg %>%
+  ggplot(aes(x=reorder(area_consistent, pct_chg), y=pct_chg, label=)) +
+  geom_bar(stat='identity', fill='#999999') +
+  geom_bar(data = occ_chg %>% filter(area_consistent == 'Providence'), stat='identity', fill=agency_color) +
+  geom_text(data = occ_chg %>% filter(area_consistent == 'Providence'), 
+            aes(label = label_percent(style_positive = "plus", accuracy = 1L)(pct_chg)),
+            nudge_y=0.016, color=agency_color, fontface='bold') +
+  coord_flip() +
+  scale_y_continuous(labels = label_percent(style_positive = "plus", accuracy = 1L)) +
+  labs(y='Change in Average Annual Wages ($2024) for Bus Drivers (Transit and Intercity) \n from Pre-Pandemic to Present',
+       x='Metropolitan Statistical Areas (Labeled by Primary City)') +
+  ggtitle("RIPTA's labor market saw some of the fastest growth in bus driver wages.")
+```
+
+While the nationwide shortage of commercial drivers has affected transit agencies around the country, it's also reasonable to expect that the labor markets for bus drivers in some metropolitan areas may have grown more competitive than others. To examine this, we can compare changes in prevailing wages for bus drivers across metro areas, as we would expect to see faster wage growth in areas where bus drivers are in particularly high demand. The data show that the Providence metro area's labor market for bus drivers is one of the tightest in the country. Average annual wages for transit & intercity bus drivers jumped 22% above inflation from pre-pandemic to the present (see Technical Note below) in the Providence area, much faster than in most of the metro areas of RIPTA's peer agencies. 
+
+_Technical Note: These data on wages come from the Bureau of Labor Statistics and its Occupational Employment and Wage Statistics (OEWS) program, which is based on biannual surveys of employers that are pooled into three-year samples to give more accurate wage estimates for specific occupations at the metropolitan area level. Thus, the definitions of "pre-pandemic" and "present" used on the chart above are not specific snapshots in time but three-year periods whose wage estimates are aggregated from six surveys each. For all the metro areas considered here, the "present" period is based on the May 2024 data release, reflecting surveys from November 2021 through May 2024, while "pre-pandemic" wage estimates come from the May 2019 data release, reflecting surveys from November 2016 through May 2019._
+
+## Conclusion
+
+RIPTA's operating costs haven't increased because of any "inefficiency," but because the agency is investing in bus driver wages to remain competitive in a tight labor market. Governor McKee and RI state legislators shouldn't be asking RIPTA to cut costs when it has already made steeper reductions to both administrative costs and service levels than any of its peers (while still outperforming most of those peers in service productivity and cost per trip). Instead, these leaders should show RIPTA's 40,000 daily riders the same urgency in filling the agency's \$32.6 million deficit that they showed to the 96,000 daily vehicles that use the Washington Bridge when they [identified \$713 million in funding sources](https://rhodeislandcurrent.com/2025/02/14/is-federal-funding-for-washington-bridge-rebuild-over-troubled-water-depends-who-you-ask/) for the bridge's replacement. 
+
+
+

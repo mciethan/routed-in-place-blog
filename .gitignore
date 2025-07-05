@@ -1,4 +1,17 @@
 **.csv
 **.xlsx
 **.pdf
+**.shp
+**.cpg
+**.dbf
+**.prj
+**.sbn
+**.sbx
+**.xml
+**.shx
+**.lyr
+**.yaml
+**.sqlite
+20250713_ri_buildingpermits/data/ossdb_2025_04/**/*.md
 **.html
+!20250713_ri_buildingpermits/towns_housingDensity_vs_permitRates.html

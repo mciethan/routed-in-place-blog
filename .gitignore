@@ -15,4 +15,6 @@
 **.sqlite
 20250713_ri_buildingpermits/data/ossdb_2025_04/**/*.md
 **.html
-!20250713_ri_buildingpermits/towns_housingDensity_vs_permitRates.html
+!20250713_ri_buildingpermits/p2_towns_housingDensity_vs_permitRates.html
+!20250713_ri_buildingpermits/p5_towns_existingBldgTypes_vs_permittedBldgTypes.html
+!20250713_ri_buildingpermits/pvd_parcel_construction_demo_map_widget.html

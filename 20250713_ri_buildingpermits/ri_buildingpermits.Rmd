@@ -519,7 +519,7 @@ p7
 ```{r}
 tdfs <- list()
 
-first_year <- 2013
+first_year <- 2002
 
 for (yyyy in first_year:2024) {
   
@@ -531,7 +531,7 @@ for (yyyy in first_year:2024) {
     # files have a mix of upper and title case columns & mix of . and _ separators - standardize first
     `names<-`(str_replace_all(str_to_lower(names(tdf)), '\\.', '_')) %>% 
     rename(any_of(c(plat_lot_unit = 'tax_map', class_desc = 'short_desc', class_desc = 'class_desc_'))) %>%
-    select(plat_lot_unit, class, class_desc) %>%
+    select(plat_lot_unit, class_desc) %>%
     mutate(year = yyyy)
 }
 
@@ -578,10 +578,10 @@ pvd_res_housing_events <- pvd_parcels %>%
       )
   ) %>%
   filter(!is.na(event_type)) %>%
-  inner_join(parcel_geoms, by='plat_lot_unit') %>% 
+  left_join(parcel_geoms, by='plat_lot_unit') %>% 
   st_as_sf() 
 
-pvd_hous_event_counts <- pvd_res_housing_events %>% st_drop_geometry() %>%
+pvd_hous_event_counts <- pvd_res_housing_events %>% #st_drop_geometry() %>%
   group_by(year, event_type, building_type) %>%
   summarise(buildings = n(), .groups='drop') %>%
   mutate(buildings=case_when(event_type == 'Demolished' ~ -buildings, .default=buildings)) 
@@ -595,12 +595,9 @@ pvd_nbhds <- st_read('data/pvd_neighborhoods/Nhoods.shp') %>%
 ```{r, fig.width=8, fig.height=6}
 p8 <- pvd_hous_event_counts %>%
   ggplot(aes(x=factor(year), y=buildings, fill=building_type)) +
-  # geom_bar(data=pvd_hous_event_counts %>% filter(event_type=='Constructed'), 
-  #          aes(fill=building_type), stat='identity', position='stack') +
-  geom_bar_pattern(#data=pvd_hous_event_counts %>% filter(event_type=='Demolished'), 
-           aes(pattern=event_type, color=building_type), pattern_fill='black', 
-           pattern_angle = 45, pattern_density = 0.1, pattern_spacing = 0.01,
-           stat='identity', position='stack') +
+  geom_bar_pattern(aes(pattern=event_type, color=building_type), 
+                   pattern_fill='black', pattern_angle = 45, pattern_density = 0.1, 
+                   pattern_spacing = 0.01, stat='identity', position='stack') +
   geom_hline(yintercept=0, color='#777') +
   scale_fill_manual(values = rev(building_type_colors[1:2]),
                     guide = guide_legend(override.aes = list(pattern = "none"))) + # <- hide pattern
@@ -610,7 +607,8 @@ p8 <- pvd_hous_event_counts %>%
     guide = guide_legend(override.aes = list(fill = "grey70")) # <- make lighter
   ) +
   lims(y=c(-50, 150)) + 
-  labs(title='Residential construction in Providence has grown steadily from 2019 through 2024.',
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title='Residential construction in Providence has recovered to pre-recession levels.',
        y='Number of Properties', x='Property Tax Year of the Construction or Demolition',
        pattern='Event Type', fill = 'Building Type')
 
@@ -629,7 +627,8 @@ pvd_parcels %>% # calculate number of residential vacant land parcels in PVD as 
 
 
 ```{r}
-shared_data <- SharedData$new(pvd_res_housing_events) # load data into crosstalk SharedData object
+# load data (minus events with null geometries) into a crosstalk SharedData object
+shared_data <- SharedData$new(pvd_res_housing_events %>% filter(!is.na(st_dimension(.)))) 
 event_pal <- colorFactor(c('#4b4', '#f99'), c('Constructed', 'Demolished'))
 muni_background <- ri_munis %>% st_transform(crs=st_crs(4326)) %>% filter(name != 'Providence')
 

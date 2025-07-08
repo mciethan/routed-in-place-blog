@@ -1,0 +1,672 @@
+---
+title: ''
+author: "Ethan McIntosh"
+date: ""
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+urlcolor: blue
+linkcolor: blue
+---
+
+## Introduction
+
+xyz
+
+## Key Takeaways
+
+* x
+* y
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(ggplot2)
+library(ggpattern) # to add pattern as a ggplot aesthetic
+library(scales)
+library(sf) # for spatial data processing
+library(RSQLite) # to connect to OSSDB
+library(units) # for geographic area unit conversions
+library(plotly) # to convert ggplot charts into interactive HTML widgets
+library(leaflet) # to create interactive maps
+library(crosstalk) # to create slider inputs for interactive maps
+library(htmltools)
+library(htmlwidgets)
+```
+
+```{r, include=FALSE}
+# function for initial processing of Census Building Permit Survey data
+read_bps <- function(file_url) { 
+  # BPS data have multi-line headers, so we read in the headers separately from the data to avoid data type issues
+  headers <- read.csv(file_url, header=F, nrows=2)
+  df <- read.csv(file_url, header=F, skip=3)
+
+  # Some of the 1st lines of the headers are blank. This code transposes the headers
+  # to fill in missing values, and then concatenates the 1st & 2nd lines to yield a single line
+  headers_singleLine <- headers %>%
+    t() %>%
+    as_tibble() %>%
+    mutate(V1 = case_when(V1=='' ~ NA, .default=V1)) %>%
+    fill(V1, .direction='down') %>%
+    t() %>%
+    as_tibble() %>%
+    set_names(names(headers)) %>%
+    mutate(id=1) %>%
+    group_by(id) %>%
+    summarise_all(~ str_c(.x, collapse = ' '), .groups='drop') %>%
+    select(-id)
+
+  names(df) <- headers_singleLine[1,]
+  return(df)
+}
+```
+
+```{r, include=FALSE}
+# # uncomment this section to pull revised monthly BPS data for 2013 through 2024
+# dfs <- list()
+# 
+# years <- 2013:2024
+# 
+# for (yyyy in years) {
+#   year_url <- paste0(
+#     'https://www2.census.gov/econ/bps/Detailed%20Revised%20Monthly/Northeast%20Region/ne', 
+#     yyyy, 'r.txt')
+# 
+#   dfs[[as.character(yyyy)]] <- read_bps(year_url)
+# }
+# 
+# dfs %>%
+#   bind_rows() %>%
+#   write.csv('data/bps_monthly_revised_NE_2013thru2024.csv', row.names=FALSE)
+```
+
+```{r, include=FALSE}
+# # uncomment this section to pull preliminary monthly BPS data for 2025 Jan thru May
+# mdfs <- list()
+# 
+# months <- 1:5
+# 
+# for (m in months) {
+#   monthly_url <- paste0(
+#     'https://www2.census.gov/econ/bps/Place/Northeast%20Region/ne25', # 2025
+#     str_pad(m, 2, pad='0'), 'c.txt')
+# 
+#   
+#   mdfs[[as.character(m)]] <- read_bps(monthly_url)
+# }
+# 
+# mdfs %>%
+#   bind_rows() %>%
+#   write.csv('data/bps_monthly_prelim_NE_2025_thruMay.csv', row.names=FALSE)
+```
+
+```{r}
+bps_full <- read.csv('data/bps_monthly_revised_NE_2013thru2024.csv', check.names=FALSE)
+bps_2025 <- read.csv('data/bps_monthly_prelim_NE_2025_thruMay.csv', check.names=FALSE)
+```
+
+```{r, include=FALSE}
+# calculate similar statistics for additional MA comparison towns besides the ones in Bristol County
+other_ma_munis <- c('Lowell', 'Reading town', 'Lawrence', 'Methuen', 'Newburyport', 'Haverhill',
+                    'Cambridge', 'Boston', 'Chelsea', 'Everett', 'Winthrop', 'Arlington', 'Revere',
+                    'Worcester', 'Milford', 'Brockton', 'Franklin', 'Foxborough', 'Taunton')
+
+bps <- bps_full %>%
+  rbind(bps_2025) %>%
+  filter(`State Code` == 44 # include all RI munis
+           # and also include towns in surrounding counties / comparable areas in MA
+         | (`State Code` == 25 & (`County Code` %in% c(5) 
+                                  | str_replace(str_to_title(`Place Name`), ' Town', '') %in% other_ma_munis))
+         ) %>%
+  mutate(`Multifamily Units` = `2-units Units` + `3-4 units Units` + `5+ units Units`,
+         `Total Units` = `1-unit Units` + `Multifamily Units`,
+         Year = floor(`Survey Date`/100), Quarter = floor((`Survey Date` - Year*100 - 1)/3)+1,
+         YYYYQQ = paste0(Year, 'Q', Quarter), 
+         County = case_match(`County Code`, 1 ~ 'Bristol', 3 ~ 'Kent', 5 ~ 'Newport', 
+                             7 ~ 'Providence', 9 ~ 'Washington'),
+         geoidshort = paste0(`State Code`, str_pad(`County Code`, 3, pad='0'), 
+                             str_pad(`FIPS MCD Code`, 5, pad='0'))
+         )
+```
+
+```{r, include=FALSE}
+# Pull in RI muni boundaries and pop / housing data from the downloaded Ocean State Spatial Database (OSSDB) file
+conn <- dbConnect(RSQLite::SQLite(), "data/ossdb_2025_04/ossdb_2025_04.sqlite")
+
+ri_munis <- dbReadTable(conn, "a_county_subdivs", geom_column = 'geom')
+
+# convert geometries from their spatialite WKB blob format into a usable format for SF
+# see https://github.com/r-spatial/sf/issues/216#issuecomment-298387743
+ri_munis$geometry <- st_as_sfc(ri_munis$geom, spatialite = TRUE)
+ri_munis <- st_as_sf(ri_munis)
+
+# I looked up variable codes in this table to help write queries
+var_lookup <- dbReadTable(conn, "c_census2020_lookup")
+
+ri_munidata <- dbGetQuery(
+  conn, "SELECT GEOIDSHORT, GEOLABEL, DP1_0001C as tot_pop, DP1_0147C AS total_HU from c_csubdivs_census2020_count")
+
+dbDisconnect(conn)
+```
+
+```{r, include=FALSE}
+# pull in MA muni boundaries and pop / housing data from downloaded MassGIS layer
+ma_towns <- st_read('data/CENSUS2020TOWNS_SHP/CENSUS2020TOWNS_POLY.shp') %>%
+  st_transform(crs=st_crs(4326)) %>%
+  transmute(geoidshort = GEOID20, name = str_to_title(TOWN20), tot_pop = POP2020, 
+            total_HU = HOUSING20, land_area = AREA_ACRES)
+```
+
+```{r, include=FALSE}
+# combine RI and MA town data
+munidata <- ri_munis %>%
+  inner_join(ri_munidata, by=join_by(geoidshort == GEOIDSHORT)) %>%
+  mutate(land_area = as.numeric(set_units(st_area(geometry), "acres"))) %>%
+  select(geoidshort, name, tot_pop, total_HU, land_area) %>%
+  rbind(ma_towns %>% st_transform(crs = st_crs(ri_munis)))
+```
+
+```{r, include=FALSE}
+# calculate housing permitting rates, housing density categories, and other town-level variables
+permit_rates <- bps %>%
+  filter(Year < 2025) %>%
+  group_by(geoidshort) %>%
+  summarise(tot_units_permitted = sum(`Total Units`),
+            units_permitted_1f = sum(`1-unit Units`),
+            units_permitted_2plusf = sum(`Multifamily Units`),
+            annual_avg_units_permitted = sum(`Total Units`)/n_distinct(Year)) %>%
+  #pivot_wider(id_cols='geoidshort', values_from=`Total Units`, names_from=Year)
+  #inner_join(ri_munis, by='geoidshort') %>% st_as_sf() %>%
+  #inner_join(ri_munidata, by=join_by(geoidshort == GEOIDSHORT)) %>%
+  inner_join(munidata, by='geoidshort') %>% st_as_sf() %>%
+  mutate(permits_per_1000hu = annual_avg_units_permitted *1000 / total_HU,
+         
+         HU_per_acre = total_HU / land_area,
+         state = case_when(str_starts(geoidshort, '25') ~ 'Massachusetts', .default='Rhode Island'),
+         state_abbr = case_when(str_starts(geoidshort, '25') ~ 'MA', .default='RI'),
+         density_category = case_when(
+           HU_per_acre < 1 ~ 'Low (< 1 Unit per Acre)',
+           HU_per_acre < 4 ~ 'Medium (1-4 Units per Acre)',
+           .default = 'High (> 4 Units per Acre)'))
+```
+
+# By Town Density
+
+introduce why building more housing in higher density areas is an important policy goal (maybe cite Land Use 2025 for the density categories, plus ). Introduce the categories I chose and the population breakdown as a segue into the units permitted over time by town density category in RI.
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+# static plot of 
+town_density_levels <- c('Low (< 1 Unit per Acre)', 'Medium (1-4 Units per Acre)', 'High (> 4 Units per Acre)')
+
+# share of 2020 population living in each category of town
+p1 <- permit_rates %>% st_drop_geometry() %>%
+  filter(state_abbr == 'RI') %>% # only consider RI for this table
+  group_by(density_category) %>%
+  summarise(across(c(tot_pop, total_HU, tot_units_permitted), sum), .groups='drop') %>%
+  transmute(`Town Density Category` = factor(density_category, levels=town_density_levels), 
+            `Population (2020)` = tot_pop/sum(tot_pop), 
+            `Housing Units (2020)` = total_HU/sum(total_HU), 
+            `Units Permitted (2013-2024)` = tot_units_permitted/sum(tot_units_permitted)) %>%
+  pivot_longer(cols=c(`Housing Units (2020)`, `Units Permitted (2013-2024)`), 
+               values_to = 'pct', names_to = '% shares of:') %>%
+  ggplot(aes(x=`Town Density Category`, y=pct, label = percent(pct, accuracy=1),
+             group=`% shares of:`, fill=`% shares of:`)) +
+  geom_bar(stat='identity', position='dodge') +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  theme(legend.position='top', legend.direction = 'horizontal',
+        axis.title.y = element_blank(), axis.text.y = element_blank(),
+        axis.ticks = element_blank(), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank()
+  ) +
+  scale_fill_manual(values=c('#bbbbbb', '#d17633')) +
+  labs(title='From 2013 through 2024, almost two thirds of new homes in RI were built in low-density towns.') +
+  lims(y=c(0,0.7))
+
+ggsave("img/p1_permitting_townDensity_barChart.png", p1, width=8, height=6)
+p1
+```
+
+``` {r, echo=FALSE, fig.width=8, fig.height=6}
+town_density_colors <- c('#ecc', '#c6a600', '#129')
+
+# interactive plot of existing housing density vs housing permitting rates
+p2 <- permit_rates %>%
+  filter(state_abbr == 'RI') %>% # only consider RI for this chart
+  ggplot(aes(x=HU_per_acre, y=permits_per_1000hu)) +
+  geom_point(aes(color=factor(density_category, levels=town_density_levels),
+                 text=paste0("<b>", name, ', ', state_abbr, '</b>',
+                         "</br></br>2020 Housing Units: ", comma(total_HU),
+                         "</br>Land Area (acres): ", comma(round(land_area)),
+                         "</br>2020 Housing Units per Acre: ", round(HU_per_acre,1),
+                         "</br>2013-2024 Annual Avg Units Permitted: ", round(annual_avg_units_permitted),
+                         "</br>Annual Avg Units Permitted per 1000 Units: ", round(permits_per_1000hu,1)
+                         ))) +
+  #geom_point(data=permit_rates %>% filter(str_starts(geoidshort, '25')), aes(color='black')) +
+  geom_smooth(method='gam', se=FALSE, linetype='dashed', color='#bbb', linewidth=0.7) + 
+  #geom_text(data=permit_rates %>% filter(name %in% towns_to_label), nudge_y=0.4) +
+  #geom_vline(xintercept=1, linetype="dashed", color = "#bbbbbb") + 
+  #geom_vline(xintercept=4, linetype="dashed", color = "#bbbbbb") +
+  geom_text(x=6.5, y=6.5, label='Hover over each town for more detail') +
+  lims(y=c(0,10)) +
+  labs(color='Town Density Category', x='Housing Units per Acre', 
+       y='Annual Average Units Permitted (2013-2024) \nper 1000 housing units (2020)',
+       title='RI towns with higher existing housing density tend to add new units at slower rates.') +
+  scale_color_manual(values=town_density_colors) # TODO: use different colors than building type colors
+
+ggsave("img/p2_towns_housingDensity_vs_permitRates.png", p2, width=8, height=6)
+
+p2_widget <- ggplotly(p2, tooltip='text') %>%
+  config(displayModeBar=FALSE) %>%
+  layout(xaxis = list(fixedrange = TRUE),
+         yaxis = list(fixedrange = TRUE),
+         legend = list(x=0.5, y=0.95)) 
+
+p2_widget %>% saveWidget(file='p2_towns_housingDensity_vs_permitRates.html',
+                                                      title='Routed in Place')
+p2_widget
+```
+
+while this is a remarkably tight trend for RI, it's not a general rule. Describe the high construction rates of high-density Boston-area munis. Also make the comparison to Worcester, maybe with a "competitiveness" framing because it's a similar city type & distance from Boston.
+
+```{r}
+permit_rates %>%
+  filter(state_abbr == 'MA') %>%
+  select(name, HU_per_acre, permits_per_1000hu) %>%
+  arrange(-HU_per_acre)
+```
+
+
+metro area as a whole in 2022's rate of 2.9 per existing 1000 units the lowest among metro areas of 1 million or more: https://rhodeislandcurrent.com/2023/08/18/providence-metro-sees-lowest-rate-of-home-construction-in-country-in-2022/
+
+
+
+What about recent trends?
+
+```{r, fig.width=8, fig.height=6}
+p3 <- bps %>%
+  filter(`State Code` == 44) %>% # only consider RI for this chart
+  inner_join(permit_rates %>% select(geoidshort, density_category), by='geoidshort') %>%
+  group_by(Year, density_category) %>%
+  summarise(across(c(`Multifamily Units`, `Total Units`), sum), .groups='drop') %>%
+  mutate(`Total Units` = case_when(
+    Year == 2025 ~ `Total Units` * 12/5, # assume the rest of 2025 will have same permit trend as first 5 months
+    .default = `Total Units`)) %>%
+  ggplot(aes(x=ifelse(Year == 2025, '2025**', as.character(Year)), y=`Total Units`, 
+             group=factor(density_category, levels=town_density_levels), 
+             fill=factor(density_category, levels=town_density_levels))) +
+  geom_bar(position='stack', stat='identity') +
+  scale_y_continuous(labels = scales::comma) +
+  scale_fill_manual(values=town_density_colors) + # TODO: use different colors
+  labs(x='Year Permitted', y='Permitted Housing Units', fill='Town Density Level',
+       tag="**Estimated based on \npreliminary data from \nJanuary through May",
+       title="Recent increases in RI's housing pipeline are mostly in medium- and high-density towns.") +
+  theme(plot.tag.position = c(0.85, 0.05), plot.tag=element_text(size = 8))
+
+ggsave("img/p3_permitting_townDensity_trends.png", p3, width=8, height=6)
+p3
+```
+
+2024 the first year that more units were permitted in medium- and high-density towns than in low-density ones.
+
+over 5000 permits a year in late 1980s to less than 1000 per year today: https://www.golocalprov.com/business/Despite-Hundreds-of-Millions-Providence-Metro-Ranks-Among-the-Worst-in-Dev
+^is that statistic from a RI housing dept report on BPS data? maybe https://www.rihousing.com/wp-content/uploads/RIHousing-Presentation-final-04.2022.pdf 
+
+but what kind of buildings?
+
+# By Building Type
+
+```{r, include=FALSE}
+host <- 'https://api.census.gov/data'
+year = '2023'
+dataset = 'acs/acs5/subject'
+base_url = paste0(c(host, year, dataset), collapse='/')
+get = '?get='
+
+# variable names: https://api.census.gov/data/2023/acs/acs5/subject/variables.html
+variables = c(
+  'S1101_C01_001E', # total households
+  
+  'S1101_C01_015E', # pct of households in 1-unit structures 
+  'S1101_C01_015M',
+  
+  'S1101_C01_016E', # pct of households in 2 or more unit structures
+  'S1101_C01_016M',
+  
+  # if we need more detail, the S2504_C01_001E series breaks occupied HUs into 1, 2, 3-4, 5-9, 10+
+  
+  'GEO_ID'
+)
+variables_string = paste0(variables, collapse=',')
+geography = '&for=county%20subdivision:*&in=state:44'
+url <- paste0(base_url, get, variables_string, geography)
+
+response <- httr::GET(url)
+data <- httr::content(response, as = "text")
+data_list <- jsonlite::fromJSON(data)
+
+header <- data_list[1,]
+values <- data_list[-1,]
+census_df <- as.data.frame(values)
+colnames(census_df) <- header
+```
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+p4 <- census_df %>%
+  filter(S1101_C01_001E > 0) %>% # filter out geographies with no housing units
+  transmute(geoidshort = substr(GEO_ID, nchar(GEO_ID)-9, nchar(GEO_ID)),
+            pct_hu_1f = as.numeric(S1101_C01_015E)/100,
+            pct_hu_2plusf = as.numeric(S1101_C01_016E)/100,
+            pct_hu_2plusf_moe = as.numeric(S1101_C01_016M)/100,
+            pct_hu_2plusf_lower = pct_hu_2plusf - pct_hu_2plusf_moe,
+            pct_hu_2plusf_upper = pct_hu_2plusf + pct_hu_2plusf_moe,
+            tot_hu = as.numeric(S1101_C01_001E),
+            num_hu_1f = round(tot_hu*pct_hu_1f),
+            num_hu_2plusf = round(tot_hu*pct_hu_2plusf)) %>%
+  inner_join(permit_rates, by='geoidshort') %>%
+  filter(state_abbr == 'RI') %>% # only consider RI for this chart
+  summarise(across(c(num_hu_1f, num_hu_2plusf, units_permitted_1f, units_permitted_2plusf), sum)) %>%
+  pivot_longer(cols=everything(), names_to='cat', values_to='units') %>%
+  mutate(bldg_type = case_when(str_detect(cat, '1f') ~ '1 Unit', .default='2+ Units'),
+         unit_type = case_when(str_detect(cat, 'permitted') ~ 'permitted', .default='existing')) %>%
+  pivot_wider(id_cols='bldg_type', values_from='units', names_from='unit_type') %>%
+  transmute(`Housing Units (2023)` = existing/sum(existing), 
+            `Units Permitted (2013-2024)` = permitted/sum(permitted),
+            `Building Type` = bldg_type) %>%
+  pivot_longer(cols=c(`Housing Units (2023)`, `Units Permitted (2013-2024)`), 
+               values_to = 'pct', names_to = '% shares of:') %>%
+  ggplot(aes(x=`Building Type`, y=pct, label = percent(pct, accuracy=1),
+             group=`% shares of:`, fill=`% shares of:`)) +
+  geom_bar(stat='identity', position='dodge') +
+  geom_text(position = position_dodge(width = 0.9), vjust = -0.5) +
+  theme(legend.position='top', legend.direction = 'horizontal',
+        axis.title.y = element_blank(), axis.text.y = element_blank(),
+        axis.ticks = element_blank(), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank()
+  ) +
+  scale_fill_manual(values=c('#bbbbbb', '#d17633')) +
+  labs(title='From 2013 through 2024, most new homes being built in RI were single-family buildings.') +
+  lims(y=c(0,0.8))
+
+ggsave("img/p4_permitting_buildingType_barChart.png", p4, width=8, height=6)
+p4
+```
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+p5 <- census_df %>%
+  filter(S1101_C01_001E > 0) %>% # filter out geographies with no housing units
+  transmute(geoidshort = substr(GEO_ID, nchar(GEO_ID)-9, nchar(GEO_ID)),
+            pct_hu_1f = as.numeric(S1101_C01_015E)/100,
+            pct_hu_2plusf = as.numeric(S1101_C01_016E)/100,
+            pct_hu_2plusf_moe = as.numeric(S1101_C01_016M)/100,
+            pct_hu_2plusf_lower = pct_hu_2plusf - pct_hu_2plusf_moe,
+            pct_hu_2plusf_upper = pct_hu_2plusf + pct_hu_2plusf_moe,
+            tot_hu = as.numeric(S1101_C01_001E),
+            num_hu_1f = round(tot_hu*pct_hu_1f),
+            num_hu_2plusf = round(tot_hu*pct_hu_2plusf)) %>%
+  inner_join(permit_rates, by='geoidshort') %>%
+  mutate(pct_permithu_1f = units_permitted_1f / tot_units_permitted, #(units_permitted_1f + units_permitted_2plusf),
+         pct_permithu_2plusf = 1 - pct_permithu_1f) %>%
+  ggplot(aes(x=pct_hu_2plusf, y=pct_permithu_2plusf, 
+             text=paste0("<b>", name, ', ', state_abbr, '</b>',
+                         #"</br></br> Units: ", comma(total_HU),
+                         #"</br>Land Area (acres): ", comma(round(land_area)),
+                         "</br></br>Multifamily Share of Existing Housing (2019-2023 average): </br>", 
+                         percent(pct_hu_2plusf, 0.1), ' ± ', percent(pct_hu_2plusf_moe, 0.1), 
+                         ' (', comma(num_hu_2plusf), ' out of ', comma(tot_hu), ' units)',
+                         "</br></br>Multifamily Share of Units Permitted (2013-2024 total): </br>", 
+                         percent(pct_permithu_2plusf, 0.1),
+                         ' (', comma(units_permitted_2plusf), ' out of ', comma(tot_units_permitted), ' units)'
+                         )
+             )) +
+  geom_point(aes(color=factor(density_category, levels=town_density_levels))) +
+  geom_abline(linetype="dashed", color = "#bbbbbb") +
+  scale_color_manual(values=town_density_colors) +
+  scale_x_continuous(labels=percent, limits=c(0,1)) +
+  scale_y_continuous(labels=percent, limits=c(0,1)) +
+  geom_errorbarh(aes(xmin = pct_hu_2plusf_lower, xmax = pct_hu_2plusf_upper,
+                     color=factor(density_category, levels=town_density_levels)),
+                 width=0.2) +
+  geom_text(aes(x=0.5, y=1, label='Hover over each town for more detail')) +
+  labs(x='Share of Existing Housing in Multifamily Structures (2019-2023)', 
+       y='Share of Permitted Housing in Multifamily Structures (2013-2024)',
+       color='Town Density Category',
+       title='In most of RI, the housing pipeline has a lower share of multifamily than the existing stock.')
+
+ggsave("img/p5_towns_existingBldgTypes_vs_permittedBldgTypes.png", p5, width=8, height=6)
+
+p5_widget <- ggplotly(p5, tooltip='text') %>%
+  config(displayModeBar=FALSE) %>%
+  layout(xaxis = list(fixedrange = TRUE),
+         yaxis = list(fixedrange = TRUE),
+         legend = list(x=0.07, y=0.9))
+
+p5_widget %>% saveWidget(file='p5_towns_existingBldgTypes_vs_permittedBldgTypes.html',
+                                                      title='Routed in Place')
+p5_widget
+```
+
+
+Providence in 2024 permitted 269 units but only 60 in 5+ unit buildings: (238 - 60 = 178) in 2-4 unit bldgs.
+Most of the multifamily permitted by PVD in 2019 and 2020 was also in 2-4 unit buildings, though not in 2022. 
+
+```{r, echo=FALSE, fig.width=8, fig.height=6}
+building_type_colors <- c('#fc9', '#394', '#529')
+
+p6 <- bps %>%
+  filter(`State Code` == 44) %>% # only consider RI for this chart
+  group_by(Year) %>%
+  summarise(across(c(`Multifamily Units`, `Total Units`, `5+ units Units`), sum), .groups='drop') %>%
+  mutate(across(c(`Multifamily Units`, `Total Units`, `5+ units Units`), ~ifelse(
+    Year == 2025, .x * 12/5, # assume the rest of 2025 will have same permit trend as first 5 months
+    .x))) %>%
+  ggplot(aes(x=ifelse(Year == 2025, '2025**', as.character(Year)))) +
+  geom_col(aes(y=`Total Units`, fill='1 Unit')) +
+  geom_col(aes(y=`Multifamily Units`, fill='2-4 Units')) +
+  geom_col(aes(y=`5+ units Units`, fill='5+ Units')) +
+  scale_fill_manual(values=building_type_colors) + # TODO: revisit these arbitrary colors
+  labs(x='Year Permitted', y='Permitted Housing Units', fill='Building Type',
+       tag="**Estimated based on \npreliminary data from \nJanuary through May",
+       title="Recent increases in RI's housing pipeline mostly consist of multifamily housing.") +
+  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8))
+
+ggsave("img/p6_permitting_bldgType_trends.png", p6, width=8, height=6)
+p6
+```
+
+2024 the first year since at least 2013 in which a majority of permitted units in RI were in multifamily buildings.
+
+# Large Projects
+
+introduce question of whether development is clustered in a few projects / areas or spread out, especially for 5+ unit buildings - the difference between dozens of six-plexes vs two or three very large apartment buildings. This is where I should acknowledge that a lot of the past two years' spike in medium density towns came from two large projects.
+
+Doing some Googling based on these results, it seems that a lot of the credit for the spike in 5+ unit buildings and in medium-density towns is the 214-unit Alta Altitude project next to TF Green. Warwick housing reports indicate that there are two other similar-sized project also coming down the pipeline in that location near TF Green, being branded as "City Centre Warwick" (https://www.warwickri.gov/economic-development/pages/city-centre-warwick).
+
+Adaptive reuse of Woonsocket Middle School into 150 units accounts for its 2023 spike (https://www.browndailyherald.com/article/2023/09/out-of-the-box-thinking-to-address-ris-housing-crisis-adaptive-reuse)
+
+Without these individual projects, RI's housing pipeline would look pretty similar to previous years, mostly low-density towns and single-family units.
+
+# Providence & 2-4 unit buildings
+
+[why we should be interested in "missing middle"]
+
+```{r, fig.width=8, fig.height=6}
+p7 <- bps %>%
+  filter(`State Code` == 44) %>% # only consider RI for this chart
+  mutate(`2-4 units` = `2-units Units` + `3-4 units Units`, 
+         Location = case_when(`Place Name` =='Providence' ~ 'Providence', .default='Rest of RI')) %>%
+  group_by(Year, Location) %>%
+  summarise(across(c(`2-4 units`, `Multifamily Units`, `Total Units`), sum), .groups='drop') %>%
+  mutate(across(c(`2-4 units`, `Multifamily Units`, `Total Units`), ~ifelse(
+    Year == 2025, .x * 12/5, # assume the rest of 2025 will have same permit trend as first 5 months
+    .x))) %>%
+  ggplot(aes(x=ifelse(Year == 2025, '2025**', as.character(Year)), y=`2-4 units`, fill=Location)) +
+  geom_bar(stat='identity', position='stack') +
+  scale_fill_manual(values=c('#0085CA', '#999')) + # TODO: revisit these arbitrary colors
+  labs(x='Year Permitted', y='Permitted Housing Units (2-4 Unit Buildings)', fill='Location',
+       tag="**Estimated based on \npreliminary data from \nJanuary through May",
+       title="In 2024 & early 2025, about half of RI's 2-4 unit housing starts were in Providence alone.") +
+  lims(y=c(0,400)) +
+  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8))
+
+ggsave("img/p7_permitted_2to4unit_location_trends.png", p7, width=8, height=6)
+p7
+```
+
+# Inferring new construction locations from Providence parcels
+
+```{r}
+tdfs <- list()
+
+first_year <- 2013
+
+for (yyyy in first_year:2024) {
+  
+  tdf <- read.csv(
+      paste0('data/providence_tax_rolls/', yyyy, '_Property_Tax_Roll_20250705.csv')) %>%
+    select(-any_of(c("UNIT"))) # 2024 file does not have unique colnames when converting to lower case
+  
+  tdfs[[as.character(yyyy)]] <- tdf %>%
+    # files have a mix of upper and title case columns & mix of . and _ separators - standardize first
+    `names<-`(str_replace_all(str_to_lower(names(tdf)), '\\.', '_')) %>% 
+    rename(any_of(c(plat_lot_unit = 'tax_map', class_desc = 'short_desc', class_desc = 'class_desc_'))) %>%
+    select(plat_lot_unit, class, class_desc) %>%
+    mutate(year = yyyy)
+}
+
+pvd_parcels <- tdfs %>%
+  bind_rows() %>%
+  group_by(plat_lot_unit) %>% # calculate each parcel-year's previous class description
+  mutate(prev_class_desc = lag(class_desc, order_by=year)) %>%
+  ungroup()
+```
+
+```{r, include=FALSE}
+parcel_geoms <- tdf %>% # this implicitly pulls the property location from the df with the highest year
+  transmute(plat_lot_unit = TAX_MAP, geom = Property_Location) %>%
+  st_as_sf(wkt = "geom", crs=st_crs(4326))
+```
+
+```{r}
+# viewing this list helped inform the content of the class_descs variables
+pvd_parcels$class_desc %>% unique()
+```
+
+```{r}
+vacant_class_descs <- c('Residential Vacant Land', 'CI Vacant Land', 'Othe Vac. Land', 
+                        'Res. Vac. Land', 'Other Vacant Land', 'Cl Vacant Land')
+res_class_descs <- c('2 -5 Family', 'Single Family')
+# I tried adding apartments and condos to the map, but there are some weird-looking data 
+# for apartments (a lot of "demolitions" in 2022 that are likely recodings) and data are 
+# very sparse and recent for condos, so I excluded them from the final output
+```
+
+```{r}
+pvd_res_housing_events <- pvd_parcels %>%
+  filter(year != first_year) %>%
+  mutate(
+    event_type = case_when(
+      class_desc %in% res_class_descs & prev_class_desc %in% vacant_class_descs ~ 'Constructed',
+      class_desc %in% vacant_class_descs & prev_class_desc %in% res_class_descs ~ 'Demolished',
+      .default=NA
+    ),
+    building_type = case_when(
+      event_type == 'Constructed' ~ class_desc,
+      event_type == 'Demolished' ~ prev_class_desc, 
+      .default=NA
+      )
+  ) %>%
+  filter(!is.na(event_type)) %>%
+  inner_join(parcel_geoms, by='plat_lot_unit') %>% 
+  st_as_sf() 
+
+pvd_hous_event_counts <- pvd_res_housing_events %>% st_drop_geometry() %>%
+  group_by(year, event_type, building_type) %>%
+  summarise(buildings = n(), .groups='drop') %>%
+  mutate(buildings=case_when(event_type == 'Demolished' ~ -buildings, .default=buildings)) 
+```
+
+```{r, include=F}
+pvd_nbhds <- st_read('data/pvd_neighborhoods/Nhoods.shp') %>%
+  st_transform(crs=st_crs(4326))
+```
+
+```{r, fig.width=8, fig.height=6}
+p8 <- pvd_hous_event_counts %>%
+  ggplot(aes(x=factor(year), y=buildings, fill=building_type)) +
+  # geom_bar(data=pvd_hous_event_counts %>% filter(event_type=='Constructed'), 
+  #          aes(fill=building_type), stat='identity', position='stack') +
+  geom_bar_pattern(#data=pvd_hous_event_counts %>% filter(event_type=='Demolished'), 
+           aes(pattern=event_type, color=building_type), pattern_fill='black', 
+           pattern_angle = 45, pattern_density = 0.1, pattern_spacing = 0.01,
+           stat='identity', position='stack') +
+  geom_hline(yintercept=0, color='#777') +
+  scale_fill_manual(values = rev(building_type_colors[1:2]),
+                    guide = guide_legend(override.aes = list(pattern = "none"))) + # <- hide pattern
+  scale_color_manual(values = rev(building_type_colors[1:2]), guide='none') +
+  scale_pattern_manual(
+    values = c("none", "stripe"),
+    guide = guide_legend(override.aes = list(fill = "grey70")) # <- make lighter
+  ) +
+  lims(y=c(-50, 150)) + 
+  labs(title='Residential construction in Providence has grown steadily from 2019 through 2024.',
+       y='Number of Properties', x='Property Tax Year of the Construction or Demolition',
+       pattern='Event Type', fill = 'Building Type')
+
+ggsave("img/p8_pvd_parcel_construction_demolition_trends.png", p8, width=8, height=6)
+p8
+```
+
+https://pvdeye.org/getting-serious-about-providences-housing-crisis/ <- includes some stats about how much floor area would have to grow - maybe something to replicate in the context of city of PVD and think about how many vacant parcels are left
+
+```{r}
+pvd_parcels %>% # calculate number of residential vacant land parcels in PVD as of 2024
+  filter(year == 2024) %>%
+  mutate(vacant = class_desc == 'Residential Vacant Land') %>%
+  summarise(num_vac_parcels = sum(vacant), tot_parcels = n())
+```
+
+
+```{r}
+shared_data <- SharedData$new(pvd_res_housing_events) # load data into crosstalk SharedData object
+event_pal <- colorFactor(c('#4b4', '#f99'), c('Constructed', 'Demolished'))
+muni_background <- ri_munis %>% st_transform(crs=st_crs(4326)) %>% filter(name != 'Providence')
+
+map <- shared_data %>%
+  leaflet(options = leafletOptions(minZoom = 11, maxZoom = 18)) %>%
+  addProviderTiles("CartoDB.Positron") %>% 
+  setView(-71.4187, 41.8206, zoom = 12) %>%
+  addPolygons(data=muni_background, fillColor='#aaa', stroke=F) %>%
+  addPolygons(data=ma_towns, fillColor='#aaa', stroke=F) %>%
+  addPolygons(data=pvd_nbhds, color='black', fillColor='white', fillOpacity=0.01, weight=1, label=~LNAME) %>%
+  addCircleMarkers(stroke=F, fillColor=~event_pal(event_type), radius=3,
+                   fillOpacity=0.8, label=~as.character(year)) %>%
+  addControl(tags$div(HTML("<b>Constructions & demolitions of small residential buildings in Providence, RI</b>")),
+             position = "topright") %>%
+  addControl(tags$div(HTML("Hover for neighborhood names and years of construction / demolition.")),
+             position = "bottomleft") %>%
+  addLegend(pal=event_pal, values=c('Constructed', 'Demolished'), 
+            position='bottomleft')
+
+widget <- bscols(widths=c(4,8),
+  list(
+    filter_checkbox(id="bldgType", label="Building Type", sharedData=shared_data, group=~building_type),
+    filter_slider(id="yearSlider", label="Year", sharedData=shared_data, 
+                          column=~year, step=1, sep='', width='100%'),
+    #HTML("Drag the slider to filter by year."),
+    HTML("<br><br>Data: City of Providence"),
+    HTML('<br><br>A "construction" is when a property code changes from vacant to built.'),
+    HTML('<br><br>A "demolition" is when a property code changes from built to vacant.')
+  ),
+  map
+)
+
+widget
+# NOTE: to export this widget properly as a standalone HTML file, I have to call the
+# widget in the console, and then use the Export -> Save as Web Page option when the
+# widget shows up in RStudio's Viewer pane.
+# Similarly, to get a static png of what the widget looks like, I have to manually
+# take a screenshot, pending the availability of better ways to generate static
+# image exports from leaflet maps or other HTML widgets in R.
+```

@@ -235,7 +235,9 @@ p1 <- permit_rates %>% st_drop_geometry() %>%
   ) +
   scale_fill_manual(values=c('#bbbbbb', '#d17633')) +
   labs(title='From 2013 through 2024, almost two thirds of new homes in RI were built in low-density towns.') +
-  lims(y=c(0,0.7))
+  lims(y=c(0,0.7)) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p1_permitting_townDensity_barChart.png", p1, width=8, height=6)
 p1
@@ -256,17 +258,15 @@ p2 <- permit_rates %>%
                          "</br>2013-2024 Annual Avg Units Permitted: ", round(annual_avg_units_permitted),
                          "</br>Annual Avg Units Permitted per 1000 Units: ", round(permits_per_1000hu,1)
                          ))) +
-  #geom_point(data=permit_rates %>% filter(str_starts(geoidshort, '25')), aes(color='black')) +
   geom_smooth(method='gam', se=FALSE, linetype='dashed', color='#bbb', linewidth=0.7) + 
-  #geom_text(data=permit_rates %>% filter(name %in% towns_to_label), nudge_y=0.4) +
-  #geom_vline(xintercept=1, linetype="dashed", color = "#bbbbbb") + 
-  #geom_vline(xintercept=4, linetype="dashed", color = "#bbbbbb") +
   geom_text(x=6.5, y=6.5, label='Hover over each town for more detail') +
   lims(y=c(0,10)) +
   labs(color='Town Density Category', x='Housing Units per Acre', 
        y='Annual Average Units Permitted (2013-2024) \nper 1000 housing units (2020)',
        title='RI towns with higher existing housing density have added new units at slower rates.') +
-  scale_color_manual(values=town_density_colors) # TODO: use different colors than building type colors
+  scale_color_manual(values=town_density_colors) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p2_towns_housingDensity_vs_permitRates.png", p2, width=8, height=6)
 
@@ -274,7 +274,11 @@ p2_widget <- ggplotly(p2, tooltip='text') %>%
   config(displayModeBar=FALSE) %>%
   layout(xaxis = list(fixedrange = TRUE),
          yaxis = list(fixedrange = TRUE),
-         legend = list(x=0.5, y=0.95)) 
+         legend = list(x=0.5, y=0.95),
+         annotations = list(
+           x=0, y=0, xanchor='left', yanchor='top', font=list(size=9, color='#bbb'), showarrow=F,
+           text='Chart: routedinplace.info   Data: US Census Building Permits Survey'
+           )) 
 
 p2_widget %>% saveWidget(file='p2_towns_housingDensity_vs_permitRates.html',
                                                       title='Routed in Place')
@@ -308,7 +312,9 @@ p3 <- bps %>%
   labs(x='Year Permitted', y='Permitted Housing Units', fill='Town Density Level',
        tag="**Estimated based on \npreliminary data from \nJanuary through May",
        title="Recent increases in RI's housing pipeline are mostly in medium- and high-density towns.") +
-  theme(plot.tag.position = c(0.85, 0.05), plot.tag=element_text(size = 8))
+  theme(plot.tag.position = c(0.85, 0.05), plot.tag=element_text(size = 8)) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p3_permitting_townDensity_trends.png", p3, width=8, height=6)
 p3
@@ -386,7 +392,9 @@ p4 <- census_df %>%
   ) +
   scale_fill_manual(values=c('#bbbbbb', '#d17633')) +
   labs(title='From 2013 through 2024, most new homes being built in RI were single-family buildings.') +
-  lims(y=c(0,0.8))
+  lims(y=c(0,0.8)) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p4_permitting_buildingType_barChart.png", p4, width=8, height=6)
 p4
@@ -431,7 +439,9 @@ p5 <- census_df %>%
   labs(x='Share of Existing Housing in Multifamily Structures (2019-2023)', 
        y='Share of Permitted Housing in Multifamily Structures (2013-2024)',
        color='Town Density Category',
-       title='In most of RI, the housing pipeline has a lower share of multifamily than the existing stock.')
+       title='In most of RI, the housing pipeline has a lower share of multifamily than the existing stock.') +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p5_towns_existingBldgTypes_vs_permittedBldgTypes.png", p5, width=8, height=6)
 
@@ -439,7 +449,11 @@ p5_widget <- ggplotly(p5, tooltip='text') %>%
   config(displayModeBar=FALSE) %>%
   layout(xaxis = list(fixedrange = TRUE),
          yaxis = list(fixedrange = TRUE),
-         legend = list(x=0.07, y=0.9))
+         legend = list(x=0.07, y=0.9),
+         annotations = list(
+           x=0.5, y=0, xanchor='left', yanchor='top', font=list(size=9, color='#bbb'), showarrow=F,
+           text='Chart: routedinplace.info   Data: US Census Building Permits Survey'
+           ))
 
 p5_widget %>% saveWidget(file='p5_towns_existingBldgTypes_vs_permittedBldgTypes.html',
                                                       title='Routed in Place')
@@ -464,7 +478,9 @@ p6 <- bps %>%
   labs(x='Year Permitted', y='Permitted Housing Units', fill='Building Type',
        tag="**Estimated based on \npreliminary data from \nJanuary through May",
        title="Recent increases in RI's housing pipeline mostly consist of multifamily housing.") +
-  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8))
+  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8)) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p6_permitting_bldgType_trends.png", p6, width=8, height=6)
 p6
@@ -489,7 +505,9 @@ p7 <- bps %>%
        tag="**Estimated based on \npreliminary data from \nJanuary through May",
        title="In 2024 & early 2025, about half of RI's 2-4 unit housing starts were in Providence alone.") +
   lims(y=c(0,400)) +
-  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8))
+  theme(plot.tag.position = c(0.93, 0.05), plot.tag=element_text(size = 8)) +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p7_permitted_2to4unit_location_trends.png", p7, width=8, height=6)
 p7
@@ -591,7 +609,9 @@ p8 <- pvd_hous_event_counts %>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   labs(title='Residential construction in Providence has recovered to pre-recession levels.',
        y='Number of Properties', x='Property Tax Year of the Construction or Demolition',
-       pattern='Event Type', fill = 'Building Type')
+       pattern='Event Type', fill = 'Building Type') +
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
 
 ggsave("img/p8_pvd_parcel_construction_demolition_trends.png", p8, width=8, height=6)
 p8
@@ -632,6 +652,7 @@ widget <- bscols(widths=c(4,8),
     filter_slider(id="yearSlider", label="Year", sharedData=shared_data, 
                           column=~year, step=1, sep='', width='100%'),
     #HTML("Drag the slider to filter by year."),
+    HTML("<br><br>Chart: routedinplace.info"),
     HTML("<br><br>Data: City of Providence"),
     HTML('<br><br>A "construction" is when a property code changes from vacant to built.'),
     HTML('<br><br>A "demolition" is when a property code changes from built to vacant.')

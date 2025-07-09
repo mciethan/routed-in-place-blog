@@ -607,7 +607,7 @@ pvd_parcels %>% # calculate number of residential vacant land parcels in PVD as 
 ```{r}
 # load data (minus events with null geometries) into a crosstalk SharedData object
 shared_data <- SharedData$new(pvd_res_housing_events %>% filter(!is.na(st_dimension(.)))) 
-event_pal <- colorFactor(c('#4b4', '#f99'), c('Constructed', 'Demolished'))
+event_pal <- colorFactor(c('#0065CA', '#e56565'), c('Constructed', 'Demolished'))
 muni_background <- ri_munis %>% st_transform(crs=st_crs(4326)) %>% filter(name != 'Providence')
 
 map <- shared_data %>%

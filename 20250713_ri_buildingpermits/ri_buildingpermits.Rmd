@@ -10,15 +10,6 @@ urlcolor: blue
 linkcolor: blue
 ---
 
-## Introduction
-
-xyz
-
-## Key Takeaways
-
-* x
-* y
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE)
 
@@ -42,7 +33,7 @@ read_bps <- function(file_url) {
   # BPS data have multi-line headers, so we read in the headers separately from the data to avoid data type issues
   headers <- read.csv(file_url, header=F, nrows=2)
   df <- read.csv(file_url, header=F, skip=3)
-
+  
   # Some of the 1st lines of the headers are blank. This code transposes the headers
   # to fill in missing values, and then concatenates the 1st & 2nd lines to yield a single line
   headers_singleLine <- headers %>%
@@ -57,8 +48,12 @@ read_bps <- function(file_url) {
     group_by(id) %>%
     summarise_all(~ str_c(.x, collapse = ' '), .groups='drop') %>%
     select(-id)
-
-  names(df) <- headers_singleLine[1,]
+  
+  # filter out any columns that are completely blank
+  df <- df[,!is.na(headers_singleLine)]
+  headers_singleLine <- headers_singleLine[!is.na(headers_singleLine)]
+  
+  names(df) <- headers_singleLine
   return(df)
 }
 ```
@@ -83,6 +78,29 @@ read_bps <- function(file_url) {
 ```
 
 ```{r, include=FALSE}
+# # uncomment this section to pull archived annual BPS data for 2002 through 2012
+# # I didn't end up using these data in the initial analysis because they require
+# # a bunch more cleaning (pre-2008 BPS data have different columns for identifying places)
+# adfs <- list()
+# 
+# years <- 2002:2012
+# 
+# for (y in years) {
+#     
+#     yearly_url <- paste0(
+#       'https://www2.census.gov/econ/bps/Place/Northeast%20Region/ne', 
+#       str_pad(y %% 1000, 2, pad='0'), '12y.txt')
+#   
+#     adfs[[as.character(y)]] <- read_bps(yearly_url)
+# }
+# 
+# adfs %>%
+#   lapply(function(df) df %>%  mutate(`Zip Code` = as.character(`Zip Code`))) %>%
+#   bind_rows() %>%
+#   write.csv('data/bps_yearly_NE_2002thru2012.csv', row.names=FALSE)
+```
+
+```{r, include=FALSE}
 # # uncomment this section to pull preliminary monthly BPS data for 2025 Jan thru May
 # mdfs <- list()
 # 
@@ -104,7 +122,7 @@ read_bps <- function(file_url) {
 
 ```{r}
 bps_full <- read.csv('data/bps_monthly_revised_NE_2013thru2024.csv', check.names=FALSE)
-bps_2025 <- read.csv('data/bps_monthly_prelim_NE_2025_thruMay.csv', check.names=FALSE)
+bps_2025 <- read.csv('data/bps_monthly_prelim_NE_2025_thruMay.csv', check.names=FALSE) 
 ```
 
 ```{r, include=FALSE}
@@ -177,9 +195,6 @@ permit_rates <- bps %>%
             units_permitted_1f = sum(`1-unit Units`),
             units_permitted_2plusf = sum(`Multifamily Units`),
             annual_avg_units_permitted = sum(`Total Units`)/n_distinct(Year)) %>%
-  #pivot_wider(id_cols='geoidshort', values_from=`Total Units`, names_from=Year)
-  #inner_join(ri_munis, by='geoidshort') %>% st_as_sf() %>%
-  #inner_join(ri_munidata, by=join_by(geoidshort == GEOIDSHORT)) %>%
   inner_join(munidata, by='geoidshort') %>% st_as_sf() %>%
   mutate(permits_per_1000hu = annual_avg_units_permitted *1000 / total_HU,
          
@@ -193,8 +208,6 @@ permit_rates <- bps %>%
 ```
 
 # By Town Density
-
-introduce why building more housing in higher density areas is an important policy goal (maybe cite Land Use 2025 for the density categories, plus ). Introduce the categories I chose and the population breakdown as a segue into the units permitted over time by town density category in RI.
 
 ```{r, echo=FALSE, fig.width=8, fig.height=6}
 # static plot of 
@@ -252,7 +265,7 @@ p2 <- permit_rates %>%
   lims(y=c(0,10)) +
   labs(color='Town Density Category', x='Housing Units per Acre', 
        y='Annual Average Units Permitted (2013-2024) \nper 1000 housing units (2020)',
-       title='RI towns with higher existing housing density tend to add new units at slower rates.') +
+       title='RI towns with higher existing housing density have added new units at slower rates.') +
   scale_color_manual(values=town_density_colors) # TODO: use different colors than building type colors
 
 ggsave("img/p2_towns_housingDensity_vs_permitRates.png", p2, width=8, height=6)
@@ -268,7 +281,7 @@ p2_widget %>% saveWidget(file='p2_towns_housingDensity_vs_permitRates.html',
 p2_widget
 ```
 
-while this is a remarkably tight trend for RI, it's not a general rule. Describe the high construction rates of high-density Boston-area munis. Also make the comparison to Worcester, maybe with a "competitiveness" framing because it's a similar city type & distance from Boston.
+MA comparison munis:
 
 ```{r}
 permit_rates %>%
@@ -276,13 +289,6 @@ permit_rates %>%
   select(name, HU_per_acre, permits_per_1000hu) %>%
   arrange(-HU_per_acre)
 ```
-
-
-metro area as a whole in 2022's rate of 2.9 per existing 1000 units the lowest among metro areas of 1 million or more: https://rhodeislandcurrent.com/2023/08/18/providence-metro-sees-lowest-rate-of-home-construction-in-country-in-2022/
-
-
-
-What about recent trends?
 
 ```{r, fig.width=8, fig.height=6}
 p3 <- bps %>%
@@ -307,13 +313,6 @@ p3 <- bps %>%
 ggsave("img/p3_permitting_townDensity_trends.png", p3, width=8, height=6)
 p3
 ```
-
-2024 the first year that more units were permitted in medium- and high-density towns than in low-density ones.
-
-over 5000 permits a year in late 1980s to less than 1000 per year today: https://www.golocalprov.com/business/Despite-Hundreds-of-Millions-Providence-Metro-Ranks-Among-the-Worst-in-Dev
-^is that statistic from a RI housing dept report on BPS data? maybe https://www.rihousing.com/wp-content/uploads/RIHousing-Presentation-final-04.2022.pdf 
-
-but what kind of buildings?
 
 # By Building Type
 
@@ -447,10 +446,6 @@ p5_widget %>% saveWidget(file='p5_towns_existingBldgTypes_vs_permittedBldgTypes.
 p5_widget
 ```
 
-
-Providence in 2024 permitted 269 units but only 60 in 5+ unit buildings: (238 - 60 = 178) in 2-4 unit bldgs.
-Most of the multifamily permitted by PVD in 2019 and 2020 was also in 2-4 unit buildings, though not in 2022. 
-
 ```{r, echo=FALSE, fig.width=8, fig.height=6}
 building_type_colors <- c('#fc9', '#394', '#529')
 
@@ -475,21 +470,7 @@ ggsave("img/p6_permitting_bldgType_trends.png", p6, width=8, height=6)
 p6
 ```
 
-2024 the first year since at least 2013 in which a majority of permitted units in RI were in multifamily buildings.
-
-# Large Projects
-
-introduce question of whether development is clustered in a few projects / areas or spread out, especially for 5+ unit buildings - the difference between dozens of six-plexes vs two or three very large apartment buildings. This is where I should acknowledge that a lot of the past two years' spike in medium density towns came from two large projects.
-
-Doing some Googling based on these results, it seems that a lot of the credit for the spike in 5+ unit buildings and in medium-density towns is the 214-unit Alta Altitude project next to TF Green. Warwick housing reports indicate that there are two other similar-sized project also coming down the pipeline in that location near TF Green, being branded as "City Centre Warwick" (https://www.warwickri.gov/economic-development/pages/city-centre-warwick).
-
-Adaptive reuse of Woonsocket Middle School into 150 units accounts for its 2023 spike (https://www.browndailyherald.com/article/2023/09/out-of-the-box-thinking-to-address-ris-housing-crisis-adaptive-reuse)
-
-Without these individual projects, RI's housing pipeline would look pretty similar to previous years, mostly low-density towns and single-family units.
-
 # Providence & 2-4 unit buildings
-
-[why we should be interested in "missing middle"]
 
 ```{r, fig.width=8, fig.height=6}
 p7 <- bps %>%
@@ -616,15 +597,12 @@ ggsave("img/p8_pvd_parcel_construction_demolition_trends.png", p8, width=8, heig
 p8
 ```
 
-https://pvdeye.org/getting-serious-about-providences-housing-crisis/ <- includes some stats about how much floor area would have to grow - maybe something to replicate in the context of city of PVD and think about how many vacant parcels are left
-
 ```{r}
 pvd_parcels %>% # calculate number of residential vacant land parcels in PVD as of 2024
   filter(year == 2024) %>%
   mutate(vacant = class_desc == 'Residential Vacant Land') %>%
   summarise(num_vac_parcels = sum(vacant), tot_parcels = n())
 ```
-
 
 ```{r}
 # load data (minus events with null geometries) into a crosstalk SharedData object

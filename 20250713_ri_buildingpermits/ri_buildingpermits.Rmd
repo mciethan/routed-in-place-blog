@@ -611,7 +611,7 @@ p8 <- pvd_hous_event_counts %>%
        y='Number of Properties', x='Property Tax Year of the Construction or Demolition',
        pattern='Event Type', fill = 'Building Type') +
   annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
-           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
+           label='Chart: routedinplace.info   Data: City of Providence')
 
 ggsave("img/p8_pvd_parcel_construction_demolition_trends.png", p8, width=8, height=6)
 p8

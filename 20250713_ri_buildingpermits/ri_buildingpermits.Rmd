@@ -259,14 +259,14 @@ p2 <- permit_rates %>%
                          "</br>Annual Avg Units Permitted per 1000 Units: ", round(permits_per_1000hu,1)
                          ))) +
   geom_smooth(method='gam', se=FALSE, linetype='dashed', color='#bbb', linewidth=0.7) + 
-  geom_text(x=6.5, y=6.5, label='Hover over each town for more detail') +
+  geom_text(x=6.5, y=6.5, label='Hover or tap on each town for more detail') +
   lims(y=c(0,10)) +
   labs(color='Town Density Category', x='Housing Units per Acre', 
        y='Annual Average Units Permitted (2013-2024) \nper 1000 housing units (2020)',
        title='RI towns with higher existing housing density have added new units at slower rates.') +
   scale_color_manual(values=town_density_colors) +
-  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
-           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.05, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: US Census Building Permits Survey, Decennial Census')
 
 ggsave("img/p2_towns_housingDensity_vs_permitRates.png", p2, width=8, height=6)
 
@@ -277,7 +277,7 @@ p2_widget <- ggplotly(p2, tooltip='text') %>%
          legend = list(x=0.5, y=0.95),
          annotations = list(
            x=0, y=0, xanchor='left', yanchor='top', font=list(size=9, color='#bbb'), showarrow=F,
-           text='Chart: routedinplace.info   Data: US Census Building Permits Survey'
+           text='Chart: routedinplace.info   Data: US Census Building Permits Survey, Decennial Census'
            )) 
 
 p2_widget %>% saveWidget(file='p2_towns_housingDensity_vs_permitRates.html',
@@ -435,13 +435,13 @@ p5 <- census_df %>%
   geom_errorbarh(aes(xmin = pct_hu_2plusf_lower, xmax = pct_hu_2plusf_upper,
                      color=factor(density_category, levels=town_density_levels)),
                  width=0.2) +
-  geom_text(aes(x=0.5, y=1, label='Hover over each town for more detail')) +
+  geom_text(aes(x=0.5, y=1, label='Hover or tap on each town for more detail')) +
   labs(x='Share of Existing Housing in Multifamily Structures (2019-2023)', 
        y='Share of Permitted Housing in Multifamily Structures (2013-2024)',
        color='Town Density Category',
        title='In most of RI, the housing pipeline has a lower share of multifamily than the existing stock.') +
-  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.1, vjust=-0.5, color='#bbb',
-           label='Chart: routedinplace.info   Data: US Census Building Permits Survey')
+  annotate(geom='text', x=-Inf, y=-Inf, size=3, hjust=-0.03, vjust=-0.5, color='#bbb',
+           label='Chart: routedinplace.info   Data: Building Permits Survey, American Community Survey')
 
 ggsave("img/p5_towns_existingBldgTypes_vs_permittedBldgTypes.png", p5, width=8, height=6)
 
@@ -451,8 +451,8 @@ p5_widget <- ggplotly(p5, tooltip='text') %>%
          yaxis = list(fixedrange = TRUE),
          legend = list(x=0.07, y=0.9),
          annotations = list(
-           x=0.5, y=0, xanchor='left', yanchor='top', font=list(size=9, color='#bbb'), showarrow=F,
-           text='Chart: routedinplace.info   Data: US Census Building Permits Survey'
+           x=0.3, y=0, xanchor='left', yanchor='top', font=list(size=9, color='#bbb'), showarrow=F,
+           text='Chart: routedinplace.info   Data: US Census Building Permits Survey, American Community Survey'
            ))
 
 p5_widget %>% saveWidget(file='p5_towns_existingBldgTypes_vs_permittedBldgTypes.html',
